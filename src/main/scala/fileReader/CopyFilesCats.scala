@@ -7,11 +7,11 @@ import cats.implicits._
 
 class CopyFilesCats {
 
-  def copy[F[_]: Concurrent](from: File, to: File): F[Long] =
+  def copy[F[_]: Concurrent](from: File, to: File, bufferSize: Int): F[Long] =
     for {
       guard <- Semaphore[F](1)
       count <- inputOutputStream(from, to, guard).use {
-                case (in, out) => guard.withPermit(transfer(in, out))
+                case (in, out) => guard.withPermit(transfer(in, out, bufferSize))
               }
     } yield count
 
@@ -29,15 +29,17 @@ class CopyFilesCats {
               else Sync[F].pure(acc)
     } yield count
 
-  private def transfer[F[_]: Sync](from: InputStream, to: OutputStream): F[Long] =
+  private def transfer[F[_]: Sync](from: InputStream, to: OutputStream, bufferSize: Int): F[Long] =
     for {
-      buffer <- Sync[F].delay(new Array[Byte](128))
+      buffer <- Sync[F].delay(new Array[Byte](bufferSize))
       total  <- transmit(from, to, buffer, 0L)
     } yield total
 
   private def inputStream[F[_]: Sync](f: File, guard: Semaphore[F]): Resource[F, FileInputStream] =
     Resource.make {
-      Sync[F].delay(new FileInputStream(f))
+      Sync[F]
+        .delay(new FileInputStream(f))
+        .handleErrorWith(_ => Sync[F].raiseError(new IllegalAccessException("origin file cannot be open")))
     } { inputStream =>
       guard.withPermit {
         Sync[F].delay(inputStream.close()).handleErrorWith(_ => Sync[F].unit)
@@ -46,7 +48,9 @@ class CopyFilesCats {
 
   private def outputStream[F[_]: Sync](f: File, guard: Semaphore[F]): Resource[F, FileOutputStream] =
     Resource.make {
-      Sync[F].delay(new FileOutputStream(f))
+      Sync[F]
+        .delay(new FileOutputStream(f))
+        .handleErrorWith(_ => Sync[F].raiseError(new IllegalAccessException("destination file cannot be open")))
     } { outputStream =>
       guard.withPermit {
         Sync[F].delay(outputStream.close()).handleErrorWith(_ => Sync[F].unit)
@@ -61,16 +65,4 @@ class CopyFilesCats {
       outStream <- outputStream(output, guard)
     } yield (inStream, outStream)
 
-  @deprecated private def inputStreamFromResources(f: File): Resource[IO, FileInputStream] =
-    Resource.fromAutoCloseable(IO(new FileInputStream(f)))
-
-  @deprecated private def outputStreamFromResources(f: File): Resource[IO, FileOutputStream] =
-    Resource.fromAutoCloseable(IO(new FileOutputStream(f)))
-
-  @deprecated def inputOutputStreamWithResources(input: File,
-                                                 output: File): Resource[IO, (FileInputStream, FileOutputStream)] =
-    for {
-      inStream  <- inputStreamFromResources(input)
-      outStream <- outputStreamFromResources(output)
-    } yield (inStream, outStream)
 }
