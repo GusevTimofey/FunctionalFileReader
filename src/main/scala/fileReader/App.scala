@@ -1,7 +1,6 @@
 package fileReader
 
 import java.io.File
-
 import cats.effect.{ ExitCode, IO, IOApp }
 
 object App extends IOApp {
@@ -14,7 +13,7 @@ object App extends IOApp {
       copyFileClass <- IO.pure(new CopyFilesCats)
       orig          = new File(origin)
       dest          = new File(destination)
-      count         <- copyFileClass.copy(orig, dest)
+      count         <- copyFileClass.copy[IO](orig, dest)
       _             <- IO(println(s"$count bytes copied from ${orig.getPath} to ${dest.getPath}"))
     } yield ExitCode.Success
 

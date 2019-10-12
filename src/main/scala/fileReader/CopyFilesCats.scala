@@ -1,56 +1,61 @@
 package fileReader
 
 import java.io._
-
 import cats.effect.concurrent.Semaphore
-import cats.effect.{ Concurrent, IO, Resource }
+import cats.effect.{ Concurrent, IO, Resource, Sync }
 import cats.implicits._
 
 class CopyFilesCats {
 
-  def copy(from: File, to: File)(implicit concurrent: Concurrent[IO]): IO[Long] =
+  def copy[F[_]: Concurrent](from: File, to: File): F[Long] =
     for {
-      guard <- Semaphore[IO](1)
+      guard <- Semaphore[F](1)
       count <- inputOutputStream(from, to, guard).use {
                 case (in, out) => guard.withPermit(transfer(in, out))
               }
     } yield count
 
-  private def transmit(origin: InputStream, destination: OutputStream, buffer: Array[Byte], acc: Long): IO[Long] =
+  private def transmit[F[_]: Sync](origin: InputStream,
+                                   destination: OutputStream,
+                                   buffer: Array[Byte],
+                                   acc: Long): F[Long] =
     for {
-      amount <- IO(origin.read(buffer, 0, buffer.length))
+      amount <- Sync[F].delay(origin.read(buffer, 0, buffer.length))
       count <- if (amount > -1)
-                IO(destination.write(buffer, 0, amount)) >> transmit(origin, destination, buffer, acc + amount)
-              else IO.pure(acc)
+                Sync[F].delay(destination.write(buffer, 0, amount)) >> transmit(origin,
+                                                                                destination,
+                                                                                buffer,
+                                                                                acc + amount)
+              else Sync[F].pure(acc)
     } yield count
 
-  private def transfer(from: InputStream, to: OutputStream): IO[Long] =
+  private def transfer[F[_]: Sync](from: InputStream, to: OutputStream): F[Long] =
     for {
-      buffer <- IO(new Array[Byte](128))
+      buffer <- Sync[F].delay(new Array[Byte](128))
       total  <- transmit(from, to, buffer, 0L)
     } yield total
 
-  private def inputStream(f: File, guard: Semaphore[IO]): Resource[IO, FileInputStream] =
+  private def inputStream[F[_]: Sync](f: File, guard: Semaphore[F]): Resource[F, FileInputStream] =
     Resource.make {
-      IO(new FileInputStream(f))
+      Sync[F].delay(new FileInputStream(f))
     } { inputStream =>
       guard.withPermit {
-        IO(inputStream.close()).handleErrorWith(_ => IO.unit)
+        Sync[F].delay(inputStream.close()).handleErrorWith(_ => Sync[F].unit)
       }
     }
 
-  private def outputStream(f: File, guard: Semaphore[IO]): Resource[IO, FileOutputStream] =
+  private def outputStream[F[_]: Sync](f: File, guard: Semaphore[F]): Resource[F, FileOutputStream] =
     Resource.make {
-      IO(new FileOutputStream(f))
+      Sync[F].delay(new FileOutputStream(f))
     } { outputStream =>
       guard.withPermit {
-        IO(outputStream.close()).handleErrorWith(_ => IO.unit)
+        Sync[F].delay(outputStream.close()).handleErrorWith(_ => Sync[F].unit)
       }
     }
 
-  private def inputOutputStream(input: File,
-                                output: File,
-                                guard: Semaphore[IO]): Resource[IO, (FileInputStream, FileOutputStream)] =
+  private def inputOutputStream[F[_]: Sync](input: File,
+                                            output: File,
+                                            guard: Semaphore[F]): Resource[F, (FileInputStream, FileOutputStream)] =
     for {
       inStream  <- inputStream(input, guard)
       outStream <- outputStream(output, guard)
