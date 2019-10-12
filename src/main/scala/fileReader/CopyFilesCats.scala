@@ -3,7 +3,7 @@ package fileReader
 import java.io._
 
 import cats.effect.concurrent.Semaphore
-import cats.effect.{Concurrent, IO, Resource}
+import cats.effect.{ Concurrent, IO, Resource }
 import cats.implicits._
 
 class CopyFilesCats {
